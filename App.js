@@ -219,6 +219,7 @@ const getStyles = (isDark) => {
             backgroundColor: colors.background,
         },
 
+
         // --- Header & Login ---
         header: {
             alignItems: "center",
@@ -674,6 +675,9 @@ const App = () => {
     const [studentFilter, setStudentFilter] = useState("");
     const [userName, setUserName] = useState("");
     const [userEmail, setUserEmail] = useState("");
+    const [otpSent, setOtpSent] = useState(false);
+    const [otpCode, setOtpCode] = useState("");
+
 
     // Language setting (default to English)
     const [currentLanguage, setCurrentLanguage] = useState('en');
@@ -838,51 +842,62 @@ const App = () => {
         setLane(tr.pending);
     }, [tr]);
 
-
-const handleLogin = async () => {
-    // Check email format
+const handleSendOtp = async () => {
     if (!userEmail.endsWith("@kl.his.edu.my")) {
         setErrorMessage("Use school email only");
         showNotification("Use school email only", "error");
         return;
     }
-
     try {
-        const response = await fetch("http://10.252.2.107:3000/login", {
+        const response = await fetch("http://10.252.2.107:3000/send-otp", {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                email: userEmail,
-            }),
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: userEmail }),
         });
-
         const data = await response.json();
-
         if (response.ok) {
-    // Save user info from database response
-    setUserName(data.user.fullname || "");
-    setUserEmail(data.user.email || "");
-    
-    // Save to AsyncStorage for next time
-    await AsyncStorage.setItem("user_authenticated", "true");
-    await AsyncStorage.setItem("user_registration", JSON.stringify({
-        name: data.user.fullname,
-        email: data.user.email,
-    }));
-    
-    setIsAuthenticated(true);
-    setCurrentScreen("Menu");
-    showNotification("Login successful", "success");
-    
+            setOtpSent(true);
+            setErrorMessage("");
+            showNotification("OTP sent to your school email!", "success");
         } else {
-            setErrorMessage(data.message || "Login failed");
-            showNotification(data.message || "Login failed", "error");
+            setErrorMessage(data.error || data.message || "Failed to send OTP");
         }
-
     } catch (error) {
-        console.error("Login error:", error);
+        setErrorMessage("Cannot connect to server");
+        showNotification("Cannot connect to server", "error");
+    }
+};
+
+
+const handleLogin = async () => {
+    // Check email format
+    if (!otpCode.trim()) {
+        setErrorMessage("Please enter the OTP code");
+        return;
+    }
+    try {
+        const response = await fetch("http://10.252.2.107:3000/verify-otp", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: userEmail, otp: otpCode }),
+        });
+        const data = await response.json();
+        if (response.ok) {
+            setUserName(data.user.fullname || "");
+            setUserEmail(data.user.email || "");
+            await AsyncStorage.setItem("user_authenticated", "true");
+            await AsyncStorage.setItem("user_registration", JSON.stringify({
+                name: data.user.fullname,
+                email: data.user.email,
+            }));
+            setIsAuthenticated(true);
+            setCurrentScreen("Menu");
+            showNotification("Login successful", "success");
+        } else {
+            setErrorMessage(data.error || data.message || "Invalid OTP");
+            showNotification(data.error || "Invalid OTP", "error");
+        }
+    } catch (error) {
         setErrorMessage("Cannot connect to server");
         showNotification("Cannot connect to server", "error");
     }
@@ -1053,18 +1068,49 @@ const handleLogin = async () => {
                 <Text style={styles.instruction}>{tr.accessControl}</Text>
 
                 <TextInput
-                    style={styles.input}
-                    value={userEmail}
-                    onChangeText={setUserEmail}
-                    placeholder="Enter school email"
-                    autoCapitalize="none"
-                    placeholderTextColor={isDarkMode ? darkColors.textSecondary : lightColors.textSecondary}
+    style={styles.input}
+    value={userEmail}
+    onChangeText={(text) => { setUserEmail(text); setOtpSent(false); setOtpCode(""); }}
+    placeholder="Enter school email"
+    autoCapitalize="none"
+    keyboardType="email-address"
+    placeholderTextColor={isDarkMode ? darkColors.textSecondary : lightColors.textSecondary}
+    editable={!otpSent}
 />
-    
-                {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
-                <TouchableOpacity style={styles.button} onPress={handleLogin}>
-                    <Text style={styles.buttonText}>{tr.authLaunch}</Text>
-                </TouchableOpacity>
+
+{otpSent && (
+    <TextInput
+        style={styles.input}
+        value={otpCode}
+        onChangeText={setOtpCode}
+        placeholder="Enter 6-digit OTP code"
+        keyboardType="number-pad"
+        maxLength={6}
+        placeholderTextColor={isDarkMode ? darkColors.textSecondary : lightColors.textSecondary}
+    />
+)}
+
+{errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
+
+{!otpSent ? (
+    <TouchableOpacity style={styles.button} onPress={handleSendOtp}>
+        <Text style={styles.buttonText}>Send OTP Code</Text>
+    </TouchableOpacity>
+) : (
+    <>
+        <TouchableOpacity style={styles.button} onPress={handleLogin}>
+            <Text style={styles.buttonText}>Verify & Login</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+            style={{ marginTop: 15 }} 
+            onPress={() => { setOtpSent(false); setOtpCode(""); setErrorMessage(""); }}
+        >
+            <Text style={{ color: isDarkMode ? '#AAAAAA' : '#666666', textAlign: 'center' }}>
+                ← Back / Resend OTP
+            </Text>
+        </TouchableOpacity>
+    </>
+)}
             </View>
             </ScrollView>
             </KeyboardAvoidingView>
@@ -1184,6 +1230,7 @@ await AsyncStorage.removeItem("user_registration");
             </TouchableOpacity>
 
             {/* Settings Icon Button - positioned higher */}
+
             <TouchableOpacity
                 style={[styles.settingsIcon, { top: Platform.OS === 'android' ? 15 : 50 }]}
                 onPress={() => {
